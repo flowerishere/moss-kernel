@@ -2,7 +2,7 @@ use core::mem::MaybeUninit;
 
 use crate::arch::{Arch, ArchImpl};
 use alloc::vec::Vec;
-use libkernel::error::Result;
+use libkernel::error::{KernelError, Result};
 use libkernel::memory::address::{TUA, UA};
 
 pub mod cstr;
@@ -27,7 +27,22 @@ pub mod cstr;
 /// communication.
 pub unsafe trait UserCopyable: Copy {}
 
+pub(super) fn ensure_user_range(addr: UA, len: usize) -> Result<()> {
+    // Userspace and the kernel's privileged mappings share a 64-bit virtual
+    // address space. A user-provided address may therefore name a kernel
+    // mapping, which must never be accepted by a uaccess primitive.
+    let addr = addr.value();
+    let limit = ArchImpl::USER_ADDRESS_LIMIT;
+    if addr >= limit || len > limit - addr {
+        return Err(KernelError::Fault);
+    }
+
+    Ok(())
+}
+
 pub async fn copy_to_user<T: UserCopyable>(dst: TUA<T>, obj: T) -> Result<()> {
+    ensure_user_range(dst.to_untyped(), core::mem::size_of::<T>())?;
+
     unsafe {
         ArchImpl::copy_to_user(
             (&obj) as *const _ as *const _,
@@ -39,6 +54,8 @@ pub async fn copy_to_user<T: UserCopyable>(dst: TUA<T>, obj: T) -> Result<()> {
 }
 
 pub async fn copy_from_user<T: UserCopyable>(src: TUA<T>) -> Result<T> {
+    ensure_user_range(src.to_untyped(), core::mem::size_of::<T>())?;
+
     let mut uninit: MaybeUninit<T> = MaybeUninit::uninit();
 
     unsafe {
@@ -56,6 +73,8 @@ pub async fn copy_from_user<T: UserCopyable>(src: TUA<T>) -> Result<T> {
 }
 
 pub fn try_copy_from_user<T: UserCopyable>(src: TUA<T>) -> Result<T> {
+    ensure_user_range(src.to_untyped(), core::mem::size_of::<T>())?;
+
     let mut uninit: MaybeUninit<T> = MaybeUninit::uninit();
 
     unsafe {
@@ -75,7 +94,14 @@ pub async fn copy_obj_array_from_user<T: UserCopyable>(
     mut src: TUA<T>,
     len: usize,
 ) -> Result<Vec<T>> {
-    let mut ret = Vec::with_capacity(len);
+    let stride = core::mem::size_of::<T>();
+    let total_len = stride.checked_mul(len).ok_or(KernelError::Fault)?;
+    ensure_user_range(src.to_untyped(), total_len)?;
+
+    // Callers impose syscall-specific limits on the number of elements. Keep
+    // the initial reservation bounded so a malformed length cannot become a
+    // huge kernel allocation before the first element is faulted in.
+    let mut ret = Vec::with_capacity(len.min(1024));
 
     for _ in 0..len {
         ret.push(copy_from_user(src).await?);
@@ -95,10 +121,14 @@ pub async fn copy_objs_to_user<T: UserCopyable>(src: &[T], mut dst: TUA<T>) -> R
 }
 
 pub async fn copy_from_user_slice(src: UA, dst: &mut [u8]) -> Result<()> {
+    ensure_user_range(src, dst.len())?;
+
     unsafe { ArchImpl::copy_from_user(src, dst.as_mut_ptr() as *mut _ as *mut _, dst.len()).await }
 }
 
 pub async fn copy_to_user_slice(src: &[u8], dst: UA) -> Result<()> {
+    ensure_user_range(dst, src.len())?;
+
     unsafe { ArchImpl::copy_to_user(src.as_ptr().cast(), dst, src.len()).await }
 }
 

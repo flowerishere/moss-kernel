@@ -18,6 +18,7 @@ mod permissions;
 mod pidfd;
 mod pidns;
 mod sched;
+mod security;
 mod signalfd;
 mod signals;
 mod socket;

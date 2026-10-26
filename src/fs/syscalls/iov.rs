@@ -18,12 +18,24 @@ pub struct IoVec {
 // SAFETY: An IoVec is safe to copy to-and-from userspace.
 unsafe impl UserCopyable for IoVec {}
 
+const IOV_MAX: usize = 1024;
+
+fn check_iov_count(count: usize) -> Result<()> {
+    if count > IOV_MAX {
+        return Err(KernelError::InvalidValue);
+    }
+
+    Ok(())
+}
+
 pub async fn sys_writev(
     ctx: &ProcessCtx,
     fd: Fd,
     iov_ptr: TUA<IoVec>,
     no_iov: usize,
 ) -> Result<usize> {
+    check_iov_count(no_iov)?;
+
     let file = ctx
         .shared()
         .fd_table
@@ -45,6 +57,8 @@ pub async fn sys_readv(
     iov_ptr: TUA<IoVec>,
     no_iov: usize,
 ) -> Result<usize> {
+    check_iov_count(no_iov)?;
+
     let file = ctx
         .shared()
         .fd_table
@@ -88,6 +102,8 @@ pub async fn sys_pwritev2(
     offset: u64,
     _flags: u32, // TODO: implement these flags
 ) -> Result<usize> {
+    check_iov_count(no_iov)?;
+
     let file = ctx
         .shared()
         .fd_table
@@ -111,6 +127,8 @@ pub async fn sys_preadv2(
     offset: u64,
     _flags: u32,
 ) -> Result<usize> {
+    check_iov_count(no_iov)?;
+
     let file = ctx
         .shared()
         .fd_table

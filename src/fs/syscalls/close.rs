@@ -1,4 +1,7 @@
-use crate::{process::fd_table::Fd, sched::syscall_ctx::ProcessCtx};
+use crate::{
+    process::fd_table::{Fd, MAX_FDS},
+    sched::syscall_ctx::ProcessCtx,
+};
 use alloc::sync::Arc;
 use bitflags::bitflags;
 use libkernel::error::{KernelError, Result};
@@ -31,16 +34,29 @@ bitflags! {
 }
 
 pub async fn sys_close_range(ctx: &ProcessCtx, first: Fd, last: Fd, flags: i32) -> Result<usize> {
-    let flags = CloseRangeFlags::from_bits_truncate(flags);
+    let flags = CloseRangeFlags::from_bits(flags).ok_or(KernelError::InvalidValue)?;
     if flags.contains(CloseRangeFlags::CLOSE_RANGE_UNSHARE) {
-        todo!("Implement CLOSE_RANGE_UNSHARE");
+        return Err(KernelError::NotSupported);
     }
     if flags.contains(CloseRangeFlags::CLOSE_RANGE_CLOEXEC) {
-        todo!("Implement CLOSE_RANGE_CLOEXEC");
+        return Err(KernelError::NotSupported);
     }
 
-    for i in first.as_raw()..=last.as_raw() {
-        close(ctx, Fd(i)).await?;
+    let first_fd = first.as_raw();
+    let last_fd = last.as_raw();
+    if first_fd < 0 || last_fd < first_fd {
+        return Err(KernelError::InvalidValue);
+    }
+
+    // Missing descriptors are not an error; descriptors above the table's
+    // limit cannot exist and need not be visited.
+    let last_fd = last_fd.min(MAX_FDS as i32 - 1);
+    for i in first_fd..=last_fd {
+        if let Err(err) = close(ctx, Fd(i)).await
+            && err != KernelError::BadFd
+        {
+            return Err(err);
+        }
     }
     Ok(0)
 }

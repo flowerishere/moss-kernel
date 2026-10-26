@@ -271,6 +271,10 @@ impl AltSigStack {
         self.ptr = old_ptr;
     }
 
+    pub fn can_restore(&self, old_ptr: UA) -> bool {
+        self.range.contains_address(old_ptr) || old_ptr == self.range.end_address()
+    }
+
     pub fn in_use(&self) -> bool {
         self.ptr != self.range.end_address()
     }

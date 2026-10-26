@@ -199,7 +199,12 @@ pub async fn sys_exit(ctx: &mut ProcessCtx, exit_code: usize) -> Result<usize> {
     ptrace_stop(ctx, TracePoint::Exit).await;
 
     if let Some(ptr) = ptr {
-        copy_to_user(ptr, 0u32).await?;
+        // A hostile or already-unmapped TID word must not prevent the thread
+        // from exiting. Linux treats this fault as fatal userspace state, not
+        // as an error from exit().
+        if let Err(err) = copy_to_user(ptr, 0u32).await {
+            warn!("Failed to clear child TID on exit: {err}");
+        }
 
         if let Ok(key) = FutexKey::new_shared(ctx, ptr) {
             futex::wake_key(1, key, u32::MAX);

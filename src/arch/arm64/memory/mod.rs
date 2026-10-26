@@ -11,6 +11,7 @@ pub mod tlb;
 pub mod uaccess;
 
 pub const PAGE_OFFSET: usize = 0xffff_0000_0000_0000;
+pub const USER_ADDRESS_LIMIT: usize = 0x0000_8000_0000_0000;
 pub const IMAGE_BASE: VA = VA::from_value(0xffff_8000_0000_0000);
 pub const FIXMAP_BASE: VA = VA::from_value(0xffff_9000_0000_0000);
 pub const MMIO_BASE: VA = VA::from_value(0xffff_d000_0000_0000);

@@ -96,7 +96,7 @@ impl SocketOps for TcpSocket {
         _count: usize,
         _flags: RecvFlags,
     ) -> libkernel::error::Result<(usize, Option<SockAddr>)> {
-        todo!()
+        Err(KernelError::NotSupported)
     }
 
     async fn recvfrom(
@@ -107,7 +107,7 @@ impl SocketOps for TcpSocket {
         _flags: RecvFlags,
         _addr: Option<SockAddr>,
     ) -> libkernel::error::Result<(usize, Option<SockAddr>)> {
-        todo!()
+        Err(KernelError::NotSupported)
     }
 
     async fn send(
@@ -117,7 +117,7 @@ impl SocketOps for TcpSocket {
         _count: usize,
         _flags: SendFlags,
     ) -> libkernel::error::Result<usize> {
-        todo!()
+        Err(KernelError::NotSupported)
     }
 
     async fn sendto(
@@ -128,7 +128,7 @@ impl SocketOps for TcpSocket {
         _flags: SendFlags,
         _addr: SockAddr,
     ) -> libkernel::error::Result<usize> {
-        todo!()
+        Err(KernelError::NotSupported)
     }
 
     async fn shutdown(&self, _how: ShutdownHow) -> libkernel::error::Result<()> {

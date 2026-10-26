@@ -12,6 +12,8 @@ impl UserCStr {
     }
 
     pub async fn copy_from_user(self, buf: &mut [u8]) -> Result<&str> {
+        super::ensure_user_range(self.0.to_untyped(), buf.len())?;
+
         // Ensure null-filled buffer.
         buf.fill(0);
 

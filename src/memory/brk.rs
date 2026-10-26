@@ -2,7 +2,10 @@ use core::convert::Infallible;
 
 use libkernel::memory::address::VA;
 
-use crate::sched::syscall_ctx::ProcessCtx;
+use crate::{
+    arch::{Arch, ArchImpl},
+    sched::syscall_ctx::ProcessCtx,
+};
 
 /// Handles the `brk` system call.
 ///
@@ -27,6 +30,10 @@ pub async fn sys_brk(ctx: &ProcessCtx, addr: VA) -> Result<usize, Infallible> {
     if addr.is_null() {
         let current_brk_val = vm.current_brk().value();
         return Ok(current_brk_val);
+    }
+
+    if addr.value() >= ArchImpl::USER_ADDRESS_LIMIT {
+        return Ok(vm.current_brk().value());
     }
 
     // For non-null addresses, attempt to resize the break.

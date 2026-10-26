@@ -47,7 +47,13 @@ pub async fn sys_sched_setaffinity(
     size: usize,
     mask: UA,
 ) -> libkernel::error::Result<usize> {
-    let mut cpu_set = vec![0u8; size];
+    if size < CPU_MASK_SIZE {
+        return Err(libkernel::error::KernelError::InvalidValue);
+    }
+
+    // The kernel's affinity mask is fixed-size. Accepting a larger userspace
+    // set must not become a request to allocate an attacker-controlled buffer.
+    let mut cpu_set = vec![0u8; CPU_MASK_SIZE];
     copy_from_user_slice(mask, cpu_set.as_mut_slice()).await?;
     let task = if pid == 0 {
         current_work()
@@ -56,10 +62,6 @@ pub async fn sys_sched_setaffinity(
         return Err(libkernel::error::KernelError::InvalidValue);
     };
     let mut sched_data = task.sched_data.lock_save_irq();
-    if CPU_MASK_SIZE > size {
-        return Err(libkernel::error::KernelError::InvalidValue);
-    }
-    cpu_set.truncate(CPU_MASK_SIZE);
     // Check if this turns off all CPUs, which is not allowed.
     let mut any_true = false;
     for i in 0..ArchImpl::cpu_count() {

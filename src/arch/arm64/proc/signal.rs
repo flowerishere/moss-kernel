@@ -1,6 +1,6 @@
 use super::vdso::VDSO_BASE;
 use crate::{
-    arch::arm64::exceptions::ExceptionState,
+    arch::{Arch, ArchImpl, arm64::exceptions::ExceptionState},
     memory::uaccess::{UserCopyable, copy_from_user, copy_to_user},
     process::thread_group::signal::{
         SigId, ksigaction::UserspaceSigAction, sigaction::SigActionFlags,
@@ -8,12 +8,15 @@ use crate::{
     sched::syscall_ctx::ProcessCtx,
 };
 use libkernel::{
-    error::Result,
-    memory::{
-        PAGE_SIZE,
-        address::{TUA, UA},
-    },
+    error::{KernelError, Result},
+    memory::address::{TUA, UA},
 };
+
+const SPSR_USER_FLAGS: u64 = 0xf000_0000; // NZCV
+
+fn valid_user_return_state(state: &ExceptionState) -> bool {
+    state.spsr_el1 & !SPSR_USER_FLAGS == 0
+}
 
 #[repr(C, align(16))]
 #[derive(Clone, Copy)]
@@ -59,9 +62,15 @@ pub async fn do_signal(
         frame.alt_stack_prev_addr = alloc.old_ptr;
         alloc.data_ptr.cast()
     } else {
-        TUA::from_value(new_state.sp_el0 as _)
-            .sub_objs(1)
-            .align(PAGE_SIZE)
+        let stack_top = new_state.sp_el0 as usize;
+        let frame_bottom = stack_top
+            .checked_sub(size_of::<RtSigFrame>())
+            .ok_or(KernelError::Fault)?;
+        if frame_bottom >= ArchImpl::USER_ADDRESS_LIMIT {
+            return Err(KernelError::Fault);
+        }
+
+        TUA::from_value(frame_bottom).align(align_of::<RtSigFrame>())
     };
 
     drop(signal);
@@ -84,13 +93,19 @@ pub async fn do_signal_return(ctx: ProcessCtx) -> Result<ExceptionState> {
     let sig_frame = copy_from_user(sig_frame_addr).await?;
 
     if !sig_frame.alt_stack_prev_addr.is_null() {
-        task.process
-            .signals
-            .lock_save_irq()
+        let mut signals = task.process.signals.lock_save_irq();
+        let alt_stack = signals
             .alt_stack
             .as_mut()
-            .expect("Alt stack disappeared during use")
-            .restore_alt_stack(sig_frame.alt_stack_prev_addr);
+            .ok_or(KernelError::InvalidValue)?;
+        if !alt_stack.can_restore(sig_frame.alt_stack_prev_addr) {
+            return Err(KernelError::InvalidValue);
+        }
+        alt_stack.restore_alt_stack(sig_frame.alt_stack_prev_addr);
+    }
+
+    if !valid_user_return_state(&sig_frame.uctx) {
+        return Err(KernelError::InvalidValue);
     }
 
     Ok(sig_frame.uctx)

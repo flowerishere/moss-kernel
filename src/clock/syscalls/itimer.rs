@@ -45,6 +45,10 @@ impl ITimerVal {
     fn is_oneshot(&self) -> bool {
         self.it_interval.tv_sec == 0 && self.it_interval.tv_nsec == 0
     }
+
+    fn is_valid(&self) -> bool {
+        TimeSpec::is_valid(self.it_interval) && TimeSpec::is_valid(self.it_value)
+    }
 }
 
 impl Default for ITimerVal {
@@ -91,14 +95,14 @@ pub fn itimer_irq_handler(tid: Tid, id: u64) -> Option<Instant> {
                 None
             }
         }
-        _ => unimplemented!(),
+        _ => None,
     }
 }
 
 async fn getitimer(current_task: &Task, which: ITimerType) -> libkernel::error::Result<ITimerVal> {
     let now = match which {
         ITimerType::Real => now().unwrap(),
-        _ => unimplemented!(),
+        _ => return Err(libkernel::error::KernelError::NotSupported),
     };
     Ok(current_task
         .i_timers
@@ -143,11 +147,16 @@ pub async fn sys_setitimer(
 ) -> libkernel::error::Result<usize> {
     let timer_type =
         ITimerType::try_from(which).map_err(|_| libkernel::error::KernelError::InvalidValue)?;
+    let new_timer = copy_from_user(new_value).await?;
+    if !new_timer.is_valid() {
+        return Err(libkernel::error::KernelError::InvalidValue);
+    }
+
     if !old_value.is_null() {
         let old_timer = getitimer(ctx.shared(), timer_type).await?;
         copy_to_user(old_value, old_timer).await?;
     }
-    let new_timer = copy_from_user(new_value).await?;
+
     match timer_type {
         ITimerType::Real => {
             let current_task = ctx.shared();
@@ -193,7 +202,7 @@ pub async fn sys_setitimer(
                     );
             }
         }
-        _ => unimplemented!(),
+        _ => return Err(libkernel::error::KernelError::NotSupported),
     }
     Ok(0)
 }

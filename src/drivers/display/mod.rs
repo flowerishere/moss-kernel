@@ -170,10 +170,9 @@ impl FileOps for FbFileOps {
         const FBIOPAN_DISPLAY: usize = 0x4606;
 
         match request {
-            FBIOGET_VSCREENINFO => todo!(),
-            FBIOPUT_VSCREENINFO => todo!(),
-            FBIOGET_FSCREENINFO => todo!(),
-            FBIOPAN_DISPLAY => todo!(),
+            FBIOGET_VSCREENINFO | FBIOPUT_VSCREENINFO | FBIOGET_FSCREENINFO | FBIOPAN_DISPLAY => {
+                Err(KernelError::NotSupported)
+            }
             _ => Err(KernelError::InvalidValue),
         }
     }

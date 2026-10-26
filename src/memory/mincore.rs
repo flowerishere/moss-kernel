@@ -1,25 +1,29 @@
-use alloc::vec;
-use alloc::vec::Vec;
 use libkernel::memory::proc_vm::address_space::UserAddressSpace;
 
-use crate::memory::uaccess::copy_to_user_slice;
-use crate::sched::syscall_ctx::ProcessCtx;
-use libkernel::memory::region::VirtMemoryRegion;
+use crate::{
+    arch::{Arch, ArchImpl},
+    memory::uaccess::{copy_to_user_slice, ensure_user_range},
+    sched::syscall_ctx::ProcessCtx,
+};
 use libkernel::{
     error::{KernelError, Result},
-    memory::PAGE_SHIFT,
-    memory::address::{UA, VA},
+    memory::{
+        PAGE_SHIFT, PAGE_SIZE,
+        address::{UA, VA},
+        region::VirtMemoryRegion,
+    },
 };
 
 pub async fn sys_mincore(ctx: &ProcessCtx, start: u64, len: usize, vec: UA) -> Result<usize> {
     // addr must be a multiple of the system page size
     // len must be > 0
-    let start_va = VA::from_value(start as usize);
-    if !start_va.is_page_aligned() {
+    let start = start as usize;
+    let start_va = VA::from_value(start);
+    if !start_va.is_page_aligned() || len == 0 {
         return Err(KernelError::InvalidValue);
     }
 
-    if len == 0 {
+    if start >= ArchImpl::USER_ADDRESS_LIMIT || len > ArchImpl::USER_ADDRESS_LIMIT - start {
         return Err(KernelError::InvalidValue);
     }
 
@@ -32,35 +36,37 @@ pub async fn sys_mincore(ctx: &ProcessCtx, start: u64, len: usize, vec: UA) -> R
 
     // Vector length must be number of pages covering the region
     let pages = region.size() >> PAGE_SHIFT;
-    let mut buf: Vec<u8> = vec![0; pages];
+    ensure_user_range(vec, pages)?;
 
-    {
-        let proc_vm = ctx.shared().vm.shared_vm();
-        let mut vm_guard = proc_vm.lock_save_irq();
-        let mm = vm_guard.mm_mut();
+    const MAX_CHUNK_PAGES: usize = 1024;
+    let mut page_index = 0;
 
-        // Validate the entire region is covered by VMAs
-        for va in region.iter_pages() {
-            if mm.find_vma(va).is_none() {
-                return Err(KernelError::NoMemory);
+    while page_index < pages {
+        let chunk_pages = MAX_CHUNK_PAGES.min(pages - page_index);
+        let mut chunk = [0u8; MAX_CHUNK_PAGES];
+        let chunk_region = VirtMemoryRegion::new(
+            region.start_address().add_pages(page_index),
+            chunk_pages * PAGE_SIZE,
+        );
+
+        {
+            let proc_vm = ctx.shared().vm.shared_vm();
+            let mut vm_guard = proc_vm.lock_save_irq();
+            let mm = vm_guard.mm_mut();
+
+            // Validate and sample one bounded chunk while the memory-map lock is held.
+            for (i, va) in chunk_region.iter_pages().enumerate() {
+                if mm.find_vma(va).is_none() {
+                    return Err(KernelError::NoMemory);
+                }
+
+                chunk[i] = u8::from(mm.address_space_mut().translate(va).is_some());
             }
         }
 
-        let as_ref = mm.address_space_mut();
-
-        for (i, va) in region.iter_pages().enumerate() {
-            let resident = as_ref.translate(va).is_some();
-            if resident {
-                buf[i] |= 1;
-            } else {
-                buf[i] &= !1;
-            }
-        }
+        copy_to_user_slice(&chunk[..chunk_pages], vec.add_bytes(page_index)).await?;
+        page_index += chunk_pages;
     }
-
-    copy_to_user_slice(&buf, vec)
-        .await
-        .map_err(|_| KernelError::Fault)?;
 
     Ok(0)
 }

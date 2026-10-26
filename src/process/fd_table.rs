@@ -51,7 +51,7 @@ pub struct FileDescriptorTable {
     next_fd_hint: usize,
 }
 
-pub(super) const MAX_FDS: usize = 8192;
+pub(crate) const MAX_FDS: usize = 8192;
 
 impl Default for FileDescriptorTable {
     fn default() -> Self {

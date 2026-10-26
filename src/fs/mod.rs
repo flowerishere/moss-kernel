@@ -533,8 +533,10 @@ impl VFS {
 
                 Ok(Arc::new(open_file))
             }
-            FileType::Symlink => unimplemented!(), // this is implemented at resolve_path_internal
-            FileType::BlockDevice(_) => todo!(),
+            // O_NOFOLLOW-style symlink handling is performed by the path
+            // resolver. Reaching here means an ordinary open of a symlink.
+            FileType::Symlink => Err(KernelError::NotSupported),
+            FileType::BlockDevice(_) => Err(KernelError::NotSupported),
             FileType::CharDevice(char_dev_descriptor) => {
                 let char_driver = DM
                     .lock_save_irq()
@@ -552,8 +554,8 @@ impl VFS {
 
                 Ok(open_file)
             }
-            FileType::Fifo => todo!(),
-            FileType::Socket => todo!(),
+            FileType::Fifo => Err(KernelError::NotSupported),
+            FileType::Socket => Err(KernelError::NotSupported),
         }
     }
 

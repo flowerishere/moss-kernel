@@ -352,7 +352,7 @@ pub async fn sys_ptrace(ctx: &ProcessCtx, op: i32, pid: PidT, addr: UA, data: UA
             }
         }
         PtraceOperation::SetOptions => {
-            let opts = PTraceOptions::from_bits_truncate(data.value());
+            let opts = PTraceOptions::from_bits(data.value()).ok_or(KernelError::InvalidValue)?;
             let mut ptrace = target_task.ptrace.lock_save_irq();
 
             // Reset to defaults.
@@ -362,7 +362,9 @@ pub async fn sys_ptrace(ctx: &ProcessCtx, op: i32, pid: PidT, addr: UA, data: UA
             for opt in opts.iter() {
                 match opt {
                     PTraceOptions::PTRACE_O_TRACESYSGOOD => ptrace.sysgood = true,
-                    PTraceOptions::PTRACE_O_EXITKILL => todo!(),
+                    PTraceOptions::PTRACE_O_EXITKILL => {
+                        return Err(KernelError::NotSupported);
+                    }
                     PTraceOptions::PTRACE_O_TRACECLONE => {
                         ptrace.break_points.insert(TracePoint::Clone);
                     }
@@ -375,7 +377,7 @@ pub async fn sys_ptrace(ctx: &ProcessCtx, op: i32, pid: PidT, addr: UA, data: UA
                     PTraceOptions::PTRACE_O_TRACEEXEC => {
                         ptrace.break_points.insert(TracePoint::Exec);
                     }
-                    _ => todo!(),
+                    _ => return Err(KernelError::NotSupported),
                 }
             }
 

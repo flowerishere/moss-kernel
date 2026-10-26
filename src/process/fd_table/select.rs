@@ -5,7 +5,7 @@ use libkernel::{
     memory::address::TUA,
 };
 
-use super::Fd;
+use super::{Fd, MAX_FDS};
 use crate::{
     clock::timespec::TimeSpec,
     drivers::timer::sleep,
@@ -318,6 +318,10 @@ pub async fn sys_ppoll(
     _sigmask: TUA<SigSet>,
     _sigset_len: usize,
 ) -> Result<usize> {
+    if nfds as usize > MAX_FDS {
+        return Err(KernelError::InvalidValue);
+    }
+
     let task = ctx.shared();
 
     let mut poll_fds = copy_obj_array_from_user(ufds, nfds as _).await?;

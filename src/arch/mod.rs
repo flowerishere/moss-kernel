@@ -40,6 +40,9 @@ pub trait Arch: CpuOps + VirtualMemory {
     /// The starting address for the logical mapping of all physical ram.
     const PAGE_OFFSET: usize;
 
+    /// The exclusive upper bound of the process virtual-address space.
+    const USER_ADDRESS_LIMIT: usize;
+
     fn name() -> &'static str;
 
     fn cpu_count() -> usize;

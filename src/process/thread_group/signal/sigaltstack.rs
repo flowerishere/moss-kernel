@@ -1,4 +1,5 @@
 use crate::{
+    arch::{Arch, ArchImpl},
     memory::uaccess::{UserCopyable, copy_from_user, copy_to_user},
     sched::syscall_ctx::ProcessCtx,
 };
@@ -94,6 +95,12 @@ pub async fn sys_sigaltstack(
             // disabled state returned when no alternate stack is installed.
             if !ss.ss_flags.contains(SigAltStackFlags::SS_DISABLE) && ss.ss_size < MIN_STACK_SZ {
                 Err(KernelError::NoMemory)?;
+            }
+            if !ss.ss_flags.contains(SigAltStackFlags::SS_DISABLE)
+                && (ss.ss_sp.value() >= ArchImpl::USER_ADDRESS_LIMIT
+                    || ss.ss_size > ArchImpl::USER_ADDRESS_LIMIT - ss.ss_sp.value())
+            {
+                return Err(KernelError::InvalidValue);
             }
 
             let new_ss: Option<AltSigStack> = ss.into();

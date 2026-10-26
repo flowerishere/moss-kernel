@@ -17,7 +17,7 @@ use libkernel::{
     },
 };
 use memory::{
-    PAGE_OFFSET,
+    PAGE_OFFSET, USER_ADDRESS_LIMIT,
     address_space::Arm64ProcessAddressSpace,
     mmu::{Arm64KernelAddressSpace, KERN_ADDR_SPC},
     uaccess::{Arm64CopyFromUser, Arm64CopyStrnFromUser, Arm64CopyToUser, try_copy_from_user},
@@ -88,6 +88,7 @@ impl Arch for Aarch64 {
     type PTraceGpRegs = Arm64PtraceGPRegs;
 
     const PAGE_OFFSET: usize = PAGE_OFFSET;
+    const USER_ADDRESS_LIMIT: usize = USER_ADDRESS_LIMIT;
 
     fn new_user_context(entry_point: VA, stack_top: VA) -> Self::UserContext {
         ExceptionState {

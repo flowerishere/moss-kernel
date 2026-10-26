@@ -891,10 +891,7 @@ pub async fn handle_syscall(mut ctx: ProcessCtx) {
             )
             .await
         }
-        _ => panic!(
-            "Unhandled syscall 0x{nr:x}, PC: 0x{:x}",
-            ctx.task().ctx.user().elr_el1
-        ),
+        _ => Err(KernelError::NotSupported),
     };
 
     let ret_val = match res {

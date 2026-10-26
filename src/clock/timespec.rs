@@ -32,15 +32,15 @@ impl From<Duration> for TimeSpec {
 }
 
 impl TimeSpec {
+    pub(crate) fn is_valid(value: Self) -> bool {
+        value.tv_sec >= 0 && value.tv_nsec <= 999_999_999
+    }
+
     pub async fn copy_from_user(src: TUA<Self>) -> Result<Self> {
         let timespec = copy_from_user(src).await?;
 
         // Sanity checking.
-        if timespec.tv_nsec > 999_999_999 {
-            return Err(KernelError::InvalidValue);
-        }
-
-        if timespec.tv_sec < 0 {
+        if !Self::is_valid(timespec) {
             return Err(KernelError::InvalidValue);
         }
 

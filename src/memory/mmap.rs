@@ -1,6 +1,10 @@
 use core::sync::atomic::{AtomicUsize, Ordering};
 
-use crate::{process::fd_table::Fd, sched::syscall_ctx::ProcessCtx};
+use crate::{
+    arch::{Arch, ArchImpl},
+    process::fd_table::Fd,
+    sched::syscall_ctx::ProcessCtx,
+};
 use alloc::{
     string::{String, ToString},
     vec::Vec,
@@ -35,6 +39,16 @@ const MREMAP_DONTUNMAP: u64 = 4;
 /// Determines the minimal address that user-space is allowed to specify for
 /// MAP_FIXED{,_NOREPLACE}.
 static MMAP_MIN_ADDR: AtomicUsize = AtomicUsize::new(0x1000);
+
+fn check_user_region(addr: VA, len: usize) -> Result<()> {
+    if addr.value() >= ArchImpl::USER_ADDRESS_LIMIT
+        || len > ArchImpl::USER_ADDRESS_LIMIT - addr.value()
+    {
+        return Err(KernelError::InvalidValue);
+    }
+
+    Ok(())
+}
 
 fn prot_to_perms(prot: u64) -> VMAPermissions {
     VMAPermissions {
@@ -80,7 +94,19 @@ pub async fn sys_mmap(
         return Err(KernelError::InvalidValue);
     }
 
+    let requested_len = len as usize;
+    let requested_len = requested_len
+        .checked_add(libkernel::memory::PAGE_MASK)
+        .map(|end| end & !libkernel::memory::PAGE_MASK)
+        .ok_or(KernelError::NoMemory)?;
+    if requested_len > ArchImpl::USER_ADDRESS_LIMIT {
+        return Err(KernelError::NoMemory);
+    }
+
     let addr = VA::from_value(addr as usize);
+    if !addr.is_null() {
+        check_user_region(addr, requested_len)?;
+    }
 
     // If `MAP_FIXED` or `MAP_FIXED_NOREPLACE` is specified, the address must be
     // page-aligned and > MMAP_MIN_ADDR.
@@ -92,11 +118,13 @@ pub async fn sys_mmap(
 
     let permissions = prot_to_perms(prot);
 
-    let requested_len = len as usize;
-
     let (kind, name) = if (flags & (MAP_ANON | MAP_ANONYMOUS)) != 0 {
         (VMAreaKind::Anon, String::new())
     } else {
+        if offset.checked_add(len).is_none() {
+            return Err(KernelError::InvalidValue);
+        }
+
         // File-backed mapping: require a valid fd and use the provided offset.
         let fd = ctx
             .shared()
@@ -177,6 +205,11 @@ fn free_unmapped_pages(pages: Vec<libkernel::memory::page::PageFrame>) -> Result
 }
 
 pub async fn sys_munmap(ctx: &ProcessCtx, addr: VA, len: usize) -> Result<usize> {
+    if !addr.is_page_aligned() || len == 0 {
+        return Err(KernelError::InvalidValue);
+    }
+    check_user_region(addr, len)?;
+
     let region = VirtMemoryRegion::new(addr, len);
     let proc_vm = ctx.shared().vm.shared_vm();
     let pages = proc_vm.lock_save_irq().mm_mut().munmap(region)?;
@@ -205,6 +238,14 @@ pub async fn sys_mremap(
 
     if new_len == 0 || !old_addr.is_page_aligned() {
         return Err(KernelError::InvalidValue);
+    }
+    if new_len > ArchImpl::USER_ADDRESS_LIMIT {
+        return Err(KernelError::InvalidValue);
+    }
+    check_user_region(old_addr, old_len)?;
+
+    if (flags & MREMAP_FIXED) != 0 {
+        check_user_region(new_addr, new_len)?;
     }
 
     if (flags & MREMAP_DONTUNMAP) != 0 {
@@ -243,6 +284,11 @@ pub async fn sys_mremap(
 }
 
 pub fn sys_mprotect(ctx: &ProcessCtx, addr: VA, len: usize, prot: u64) -> Result<usize> {
+    if !addr.is_page_aligned() {
+        return Err(KernelError::InvalidValue);
+    }
+    check_user_region(addr, len)?;
+
     let perms = prot_to_perms(prot);
     let region = VirtMemoryRegion::new(addr, len);
 

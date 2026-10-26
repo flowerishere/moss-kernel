@@ -51,6 +51,19 @@ impl Instant {
             freq: USER_HZ,
         }
     }
+
+    fn saturating_add_duration(self, rhs: Duration) -> Self {
+        let secs_tick = rhs.as_secs().saturating_mul(self.freq);
+        let nsecs_tick = ((self.freq as u128 * rhs.subsec_nanos() as u128) / 1_000_000_000) as u64;
+
+        Self {
+            ticks: self
+                .ticks
+                .saturating_add(secs_tick)
+                .saturating_add(nsecs_tick),
+            freq: self.freq,
+        }
+    }
 }
 
 impl From<Instant> for Duration {
@@ -117,13 +130,7 @@ impl Add<Duration> for Instant {
     type Output = Self;
 
     fn add(self, rhs: Duration) -> Self::Output {
-        let secs_tick = rhs.as_secs() * self.freq;
-        let nsecs_tick = ((self.freq as u128 * rhs.subsec_nanos() as u128) / 1_000_000_000) as u64;
-
-        Self {
-            ticks: self.ticks + secs_tick + nsecs_tick,
-            freq: self.freq,
-        }
+        self.saturating_add_duration(rhs)
     }
 }
 
