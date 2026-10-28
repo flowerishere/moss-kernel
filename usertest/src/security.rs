@@ -73,6 +73,22 @@ fn test_close_range_hostile_flags_are_rejected() {
 
 register_test!(test_close_range_hostile_flags_are_rejected);
 
+fn test_close_range_uint_max_is_handled() {
+    let path = b"/dev/null\0";
+    let fd = unsafe { libc::open(path.as_ptr().cast::<libc::c_char>(), libc::O_RDONLY) };
+    assert!(fd >= 0);
+
+    let ret = unsafe { libc::syscall(libc::SYS_close_range, fd as u32, u32::MAX, 0) };
+    assert_eq!(ret, 0);
+    assert_eq!(unsafe { libc::fcntl(fd, libc::F_GETFD) }, -1);
+    assert_eq!(
+        std::io::Error::last_os_error().raw_os_error(),
+        Some(libc::EBADF)
+    );
+}
+
+register_test!(test_close_range_uint_max_is_handled);
+
 fn test_unimplemented_itimers_are_rejected() {
     let virtual_timer = unsafe { libc::syscall(libc::SYS_getitimer, libc::ITIMER_VIRTUAL, 0) };
     assert_syscall_errno(virtual_timer, libc::ENOSYS);

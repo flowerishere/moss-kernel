@@ -33,7 +33,7 @@ bitflags! {
     }
 }
 
-pub async fn sys_close_range(ctx: &ProcessCtx, first: Fd, last: Fd, flags: i32) -> Result<usize> {
+pub async fn sys_close_range(ctx: &ProcessCtx, first: u32, last: u32, flags: i32) -> Result<usize> {
     let flags = CloseRangeFlags::from_bits(flags).ok_or(KernelError::InvalidValue)?;
     if flags.contains(CloseRangeFlags::CLOSE_RANGE_UNSHARE) {
         return Err(KernelError::NotSupported);
@@ -42,17 +42,15 @@ pub async fn sys_close_range(ctx: &ProcessCtx, first: Fd, last: Fd, flags: i32) 
         return Err(KernelError::NotSupported);
     }
 
-    let first_fd = first.as_raw();
-    let last_fd = last.as_raw();
-    if first_fd < 0 || last_fd < first_fd {
+    if last < first {
         return Err(KernelError::InvalidValue);
     }
 
     // Missing descriptors are not an error; descriptors above the table's
     // limit cannot exist and need not be visited.
-    let last_fd = last_fd.min(MAX_FDS as i32 - 1);
-    for i in first_fd..=last_fd {
-        if let Err(err) = close(ctx, Fd(i)).await
+    let last_fd = last.min(MAX_FDS as u32 - 1);
+    for fd in first..=last_fd {
+        if let Err(err) = close(ctx, Fd(fd as i32)).await
             && err != KernelError::BadFd
         {
             return Err(err);
