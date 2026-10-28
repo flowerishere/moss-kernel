@@ -301,6 +301,71 @@ fn test_clone_with_kernel_tid_address_still_exits() {
 
 register_test!(test_clone_with_kernel_tid_address_still_exits);
 
+fn assert_unsupported_ptrace_option_preserves_state(option: libc::c_int) {
+    let pid = unsafe { libc::fork() };
+    assert!(pid >= 0);
+
+    if pid == 0 {
+        assert_eq!(unsafe { libc::ptrace(libc::PTRACE_TRACEME, 0, 0, 0) }, 0);
+        unsafe { libc::raise(libc::SIGTRAP) };
+
+        // The parent enables syscall tracing before resuming us.
+        unsafe { libc::getpid() };
+        unsafe { libc::_exit(0) };
+    }
+
+    let mut status = 0;
+    assert_eq!(unsafe { libc::waitpid(pid, &mut status, 0) }, pid);
+    assert!(libc::WIFSTOPPED(status));
+
+    assert_eq!(
+        unsafe {
+            libc::ptrace(
+                libc::PTRACE_SETOPTIONS,
+                pid,
+                0,
+                libc::PTRACE_O_TRACESYSGOOD as usize,
+            )
+        },
+        0
+    );
+
+    // This option is recognized by the ABI but intentionally unsupported. Its
+    // failure must not clear TRACESYSGOOD or other existing tracing options.
+    let bad_options = unsafe { libc::ptrace(libc::PTRACE_SETOPTIONS, pid, 0, option as usize) };
+    assert_syscall_errno(bad_options, libc::ENOSYS);
+
+    assert_eq!(unsafe { libc::ptrace(libc::PTRACE_SYSCALL, pid, 0, 0) }, 0);
+
+    let mut syscall_status = 0;
+    assert_eq!(unsafe { libc::waitpid(pid, &mut syscall_status, 0) }, pid);
+    assert!(libc::WIFSTOPPED(syscall_status));
+    assert_eq!((syscall_status >> 8) & 0xff, libc::SIGTRAP as i32 | 0x80);
+
+    assert_eq!(unsafe { libc::ptrace(libc::PTRACE_CONT, pid, 0, 0) }, 0);
+    let mut exit_status = 0;
+    assert_eq!(unsafe { libc::waitpid(pid, &mut exit_status, 0) }, pid);
+    assert!(libc::WIFEXITED(exit_status));
+}
+
+fn test_ptrace_exitkill_failure_preserves_state() {
+    assert_unsupported_ptrace_option_preserves_state(libc::PTRACE_O_EXITKILL);
+}
+
+register_test!(test_ptrace_exitkill_failure_preserves_state);
+
+fn test_ptrace_tracevfork_done_option_is_rejected() {
+    assert_unsupported_ptrace_option_preserves_state(libc::PTRACE_O_TRACEVFORKDONE);
+}
+
+register_test!(test_ptrace_tracevfork_done_option_is_rejected);
+
+fn test_ptrace_traceseccomp_option_is_rejected() {
+    assert_unsupported_ptrace_option_preserves_state(libc::PTRACE_O_TRACESECCOMP);
+}
+
+register_test!(test_ptrace_traceseccomp_option_is_rejected);
+
 fn test_kernel_address_write_is_rejected() {
     let timer = libc::itimerval {
         it_interval: libc::timeval {

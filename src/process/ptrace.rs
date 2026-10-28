@@ -81,6 +81,13 @@ pub struct PTrace {
     sysgood: bool,
 }
 
+const SUPPORTED_PTRACE_OPTIONS: PTraceOptions = PTraceOptions::PTRACE_O_TRACESYSGOOD
+    .union(PTraceOptions::PTRACE_O_TRACEFORK)
+    .union(PTraceOptions::PTRACE_O_TRACEVFORK)
+    .union(PTraceOptions::PTRACE_O_TRACECLONE)
+    .union(PTraceOptions::PTRACE_O_TRACEEXEC)
+    .union(PTraceOptions::PTRACE_O_TRACEEXIT);
+
 impl PTrace {
     pub fn new() -> Self {
         Self {
@@ -353,6 +360,10 @@ pub async fn sys_ptrace(ctx: &ProcessCtx, op: i32, pid: PidT, addr: UA, data: UA
         }
         PtraceOperation::SetOptions => {
             let opts = PTraceOptions::from_bits(data.value()).ok_or(KernelError::InvalidValue)?;
+            if opts | SUPPORTED_PTRACE_OPTIONS != SUPPORTED_PTRACE_OPTIONS {
+                return Err(KernelError::NotSupported);
+            }
+
             let mut ptrace = target_task.ptrace.lock_save_irq();
 
             // Reset to defaults.
@@ -362,9 +373,6 @@ pub async fn sys_ptrace(ctx: &ProcessCtx, op: i32, pid: PidT, addr: UA, data: UA
             for opt in opts.iter() {
                 match opt {
                     PTraceOptions::PTRACE_O_TRACESYSGOOD => ptrace.sysgood = true,
-                    PTraceOptions::PTRACE_O_EXITKILL => {
-                        return Err(KernelError::NotSupported);
-                    }
                     PTraceOptions::PTRACE_O_TRACECLONE => {
                         ptrace.break_points.insert(TracePoint::Clone);
                     }
@@ -377,7 +385,13 @@ pub async fn sys_ptrace(ctx: &ProcessCtx, op: i32, pid: PidT, addr: UA, data: UA
                     PTraceOptions::PTRACE_O_TRACEEXEC => {
                         ptrace.break_points.insert(TracePoint::Exec);
                     }
-                    _ => return Err(KernelError::NotSupported),
+                    PTraceOptions::PTRACE_O_TRACEVFORK_DONE
+                    | PTraceOptions::PTRACE_O_TRACESECCOMP
+                    | PTraceOptions::PTRACE_O_EXITKILL
+                    | PTraceOptions::PTRACE_O_SUSPEND_SECCOMP => {
+                        unreachable!("unsupported ptrace options were validated above");
+                    }
+                    _ => unreachable!("bitflags iterator yielded an unknown option"),
                 }
             }
 
