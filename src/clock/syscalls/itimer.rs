@@ -1,5 +1,4 @@
 use crate::clock::timer::{TimerNamespace, make_timer_id, parse_timer_id};
-use crate::clock::timespec::TimeSpec;
 use crate::drivers::timer::{Instant, now};
 use crate::memory::uaccess::{UserCopyable, copy_from_user, copy_to_user};
 use crate::process::thread_group::signal::SigId;
@@ -32,35 +31,59 @@ impl TryFrom<i32> for ITimerType {
 
 #[derive(Copy, Clone)]
 #[repr(C)]
+pub struct TimeVal {
+    tv_sec: i64,
+    tv_usec: i64,
+}
+
+impl TimeVal {
+    fn is_valid(self) -> bool {
+        self.tv_sec >= 0 && self.tv_usec >= 0 && self.tv_usec < 1_000_000
+    }
+
+    fn into_duration(self) -> Duration {
+        Duration::new(self.tv_sec as _, (self.tv_usec as u32 * 1_000) as _)
+    }
+
+    fn from_duration(duration: Duration) -> Self {
+        Self {
+            tv_sec: duration.as_secs() as _,
+            tv_usec: duration.subsec_micros() as _,
+        }
+    }
+}
+
+#[derive(Copy, Clone)]
+#[repr(C)]
 pub struct ITimerVal {
-    it_interval: TimeSpec,
-    it_value: TimeSpec,
+    it_interval: TimeVal,
+    it_value: TimeVal,
 }
 
 impl ITimerVal {
     fn is_disabled(&self) -> bool {
-        self.it_value.tv_sec == 0 && self.it_value.tv_nsec == 0
+        self.it_value.tv_sec == 0 && self.it_value.tv_usec == 0
     }
 
     fn is_oneshot(&self) -> bool {
-        self.it_interval.tv_sec == 0 && self.it_interval.tv_nsec == 0
+        self.it_interval.tv_sec == 0 && self.it_interval.tv_usec == 0
     }
 
     fn is_valid(&self) -> bool {
-        TimeSpec::is_valid(self.it_interval) && TimeSpec::is_valid(self.it_value)
+        self.it_interval.is_valid() && self.it_value.is_valid()
     }
 }
 
 impl Default for ITimerVal {
     fn default() -> Self {
         Self {
-            it_interval: TimeSpec {
+            it_interval: TimeVal {
                 tv_sec: 0,
-                tv_nsec: 0,
+                tv_usec: 0,
             },
-            it_value: TimeSpec {
+            it_value: TimeVal {
                 tv_sec: 0,
-                tv_nsec: 0,
+                tv_usec: 0,
             },
         }
     }
@@ -112,14 +135,8 @@ async fn getitimer(current_task: &Task, which: ITimerType) -> libkernel::error::
             let remaining = t.next - now;
             let interval = t.interval.unwrap_or_default();
             ITimerVal {
-                it_interval: TimeSpec {
-                    tv_sec: interval.as_secs() as _,
-                    tv_nsec: interval.subsec_nanos() as _,
-                },
-                it_value: TimeSpec {
-                    tv_sec: remaining.as_secs() as _,
-                    tv_nsec: remaining.subsec_nanos() as _,
-                },
+                it_interval: TimeVal::from_duration(interval),
+                it_value: TimeVal::from_duration(remaining),
             }
         })
         .unwrap_or_default())
@@ -164,21 +181,12 @@ pub async fn sys_setitimer(
             let interval = if new_timer.is_oneshot() {
                 None
             } else {
-                Some(Duration::new(
-                    new_timer.it_interval.tv_sec as _,
-                    new_timer.it_interval.tv_nsec as _,
-                ))
+                Some(new_timer.it_interval.into_duration())
             };
             let next = if new_timer.is_disabled() {
                 None
             } else {
-                Some(
-                    now().unwrap()
-                        + Duration::new(
-                            new_timer.it_value.tv_sec as _,
-                            new_timer.it_value.tv_nsec as _,
-                        ),
-                )
+                Some(now().unwrap() + new_timer.it_value.into_duration())
             };
             if timers.real.is_some() {
                 crate::drivers::timer::SYS_TIMER

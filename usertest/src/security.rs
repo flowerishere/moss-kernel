@@ -1,20 +1,6 @@
 use crate::register_test;
 use core::mem::size_of;
 
-#[repr(C)]
-#[derive(Clone, Copy)]
-struct ITimerVal {
-    it_interval: Timespec,
-    it_value: Timespec,
-}
-
-#[repr(C)]
-#[derive(Clone, Copy)]
-struct Timespec {
-    tv_sec: i64,
-    tv_nsec: u64,
-}
-
 // The base of the kernel's direct-map region. Uaccess must reject this address
 // without probing it, so the pointer does not need to name a mapped object.
 const KERNEL_ADDRESS: usize = 0xffff_0000_0000_0000;
@@ -25,8 +11,8 @@ fn test_kernel_address_read_is_rejected() {
         libc::syscall(
             libc::SYS_setitimer,
             libc::ITIMER_REAL,
-            KERNEL_ADDRESS as *const ITimerVal,
-            core::ptr::null_mut::<ITimerVal>(),
+            KERNEL_ADDRESS as *const libc::itimerval,
+            core::ptr::null_mut::<libc::itimerval>(),
         )
     };
     assert_eq!(ret, -1);
@@ -98,6 +84,64 @@ fn test_unimplemented_itimers_are_rejected() {
 }
 
 register_test!(test_unimplemented_itimers_are_rejected);
+
+fn test_itimer_abi_uses_microseconds() {
+    // Ignore SIGALRM so the deliberate unit-regression check cannot turn an
+    // early expiration into a test termination.
+    assert_ne!(
+        unsafe { libc::signal(libc::SIGALRM, libc::SIG_IGN) },
+        libc::SIG_ERR
+    );
+
+    let timer = libc::itimerval {
+        it_interval: libc::timeval {
+            tv_sec: 0,
+            tv_usec: 0,
+        },
+        it_value: libc::timeval {
+            tv_sec: 0,
+            tv_usec: 500_000,
+        },
+    };
+    assert_eq!(
+        unsafe {
+            libc::setitimer(
+                libc::ITIMER_REAL,
+                &timer,
+                core::ptr::null_mut::<libc::itimerval>(),
+            )
+        },
+        0
+    );
+
+    std::thread::sleep(std::time::Duration::from_millis(10));
+
+    let mut current: libc::itimerval = unsafe { core::mem::zeroed() };
+    assert_eq!(
+        unsafe { libc::getitimer(libc::ITIMER_REAL, &mut current) },
+        0
+    );
+
+    let disabled: libc::itimerval = unsafe { core::mem::zeroed() };
+    assert_eq!(
+        unsafe {
+            libc::setitimer(
+                libc::ITIMER_REAL,
+                &disabled,
+                core::ptr::null_mut::<libc::itimerval>(),
+            )
+        },
+        0
+    );
+
+    // A correct 500 ms timer cannot have expired after 10 ms. If the ABI
+    // were parsed as nanoseconds, these fields would all be zero here.
+    assert_eq!(current.it_value.tv_sec, 0);
+    assert!(current.it_value.tv_usec > 0);
+    assert!(current.it_value.tv_usec < 1_000_000);
+}
+
+register_test!(test_itimer_abi_uses_microseconds);
 
 fn test_tcp_data_path_is_rejected_not_fatal() {
     let fd = unsafe { libc::socket(libc::AF_INET, libc::SOCK_STREAM, libc::IPPROTO_TCP) };
@@ -258,14 +302,14 @@ fn test_clone_with_kernel_tid_address_still_exits() {
 register_test!(test_clone_with_kernel_tid_address_still_exits);
 
 fn test_kernel_address_write_is_rejected() {
-    let timer = ITimerVal {
-        it_interval: Timespec {
+    let timer = libc::itimerval {
+        it_interval: libc::timeval {
             tv_sec: 0,
-            tv_nsec: 0,
+            tv_usec: 0,
         },
-        it_value: Timespec {
+        it_value: libc::timeval {
             tv_sec: 1,
-            tv_nsec: 0,
+            tv_usec: 0,
         },
     };
 
@@ -274,7 +318,7 @@ fn test_kernel_address_write_is_rejected() {
             libc::SYS_setitimer,
             libc::ITIMER_REAL,
             &timer,
-            core::ptr::null_mut::<ITimerVal>(),
+            core::ptr::null_mut::<libc::itimerval>(),
         )
     };
     assert_eq!(set_ret, 0);
@@ -283,7 +327,7 @@ fn test_kernel_address_write_is_rejected() {
         libc::syscall(
             libc::SYS_getitimer,
             libc::ITIMER_REAL,
-            KERNEL_ADDRESS as *mut ITimerVal,
+            KERNEL_ADDRESS as *mut libc::itimerval,
         )
     };
     assert_eq!(get_ret, -1);
@@ -293,14 +337,14 @@ fn test_kernel_address_write_is_rejected() {
     );
 
     // Disarm the timer before returning.
-    let disabled = ITimerVal {
-        it_interval: Timespec {
+    let disabled = libc::itimerval {
+        it_interval: libc::timeval {
             tv_sec: 0,
-            tv_nsec: 0,
+            tv_usec: 0,
         },
-        it_value: Timespec {
+        it_value: libc::timeval {
             tv_sec: 0,
-            tv_nsec: 0,
+            tv_usec: 0,
         },
     };
     let disarm_ret = unsafe {
@@ -308,7 +352,7 @@ fn test_kernel_address_write_is_rejected() {
             libc::SYS_setitimer,
             libc::ITIMER_REAL,
             &disabled,
-            core::ptr::null_mut::<ITimerVal>(),
+            core::ptr::null_mut::<libc::itimerval>(),
         )
     };
     assert_eq!(disarm_ret, 0);
