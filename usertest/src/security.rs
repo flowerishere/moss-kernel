@@ -18,6 +18,7 @@ struct Timespec {
 // The base of the kernel's direct-map region. Uaccess must reject this address
 // without probing it, so the pointer does not need to name a mapped object.
 const KERNEL_ADDRESS: usize = 0xffff_0000_0000_0000;
+const USER_ADDRESS_LIMIT: usize = 0x0000_8000_0000_0000;
 
 fn test_kernel_address_read_is_rejected() {
     let ret = unsafe {
@@ -191,6 +192,22 @@ fn test_kernel_path_pointer_is_rejected() {
 }
 
 register_test!(test_kernel_path_pointer_is_rejected);
+
+fn test_short_path_near_user_limit_is_accepted() {
+    // The path ends 22 bytes before the user limit, but callers commonly pass
+    // a much larger temporary path buffer. The scanner must stop at the NUL.
+    let path = b"/dev/null\0";
+    let dst = (USER_ADDRESS_LIMIT - 32) as *mut u8;
+    unsafe {
+        core::ptr::copy_nonoverlapping(path.as_ptr(), dst, path.len());
+    }
+
+    let fd = unsafe { libc::open(dst.cast::<libc::c_char>(), libc::O_RDONLY) };
+    assert!(fd >= 0);
+    assert_eq!(unsafe { libc::close(fd) }, 0);
+}
+
+register_test!(test_short_path_near_user_limit_is_accepted);
 
 fn test_clone_with_kernel_tid_address_still_exits() {
     const CLONE_PARENT_SETTID: libc::c_int = 0x100_000;
